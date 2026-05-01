@@ -249,25 +249,103 @@ class SalvarMenuModal(discord.ui.Modal, title="Salvar Menu"):
         await interaction.response.send_message(f"✅ Menu **{nome}** salvo com sucesso!", ephemeral=True)
 
 
-class CategoriasView(discord.ui.View):
-    def __init__(self, parent_view: "ConfigView"):
+# ---------- Gerenciamento de Categorias e Produtos ----------
+
+class ProdutoModal(discord.ui.Modal):
+    def __init__(self, view: "ProdutosView", ci: int, pi: int = None):
+        titulo = "Editar Produto" if pi is not None else "Adicionar Produto"
+        super().__init__(title=titulo)
+        self.view_ref = view
+        self.ci = ci
+        self.pi = pi
+        
+        m = view.parent.parent.menu
+        prod = m["categorias"][ci]["produtos"][pi] if pi is not None else {"nome": "", "preco": 0.0, "emoji": "🛍️", "estoque": []}
+        
+        self.nome = discord.ui.TextInput(label="Nome do Produto", default=prod["nome"], max_length=100, required=True)
+        self.preco = discord.ui.TextInput(label="Preço (ex: 10.50)", default=str(prod["preco"]), max_length=20, required=True)
+        self.emoji = discord.ui.TextInput(label="Emoji", default=prod["emoji"], max_length=100, required=False)
+        self.estoque = discord.ui.TextInput(
+            label="Estoque (um por linha)", 
+            style=discord.TextStyle.paragraph,
+            default="\n".join(prod["estoque"]),
+            required=False
+        )
+        
+        self.add_item(self.nome)
+        self.add_item(self.preco)
+        self.add_item(self.emoji)
+        self.add_item(self.estoque)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        m = self.view_ref.parent.parent.menu
+        try:
+            preco_val = float(self.preco.value.replace(",", "."))
+        except ValueError:
+            return await interaction.response.send_message("❌ Preço inválido.", ephemeral=True)
+            
+        estoque_list = [line.strip() for line in self.estoque.value.split("\n") if line.strip()]
+        
+        prod_data = {
+            "nome": self.nome.value,
+            "preco": preco_val,
+            "emoji": self.emoji.value or "🛍️",
+            "estoque": estoque_list
+        }
+        
+        if self.pi is not None:
+            m["categorias"][self.ci]["produtos"][self.pi] = prod_data
+        else:
+            m["categorias"][self.ci]["produtos"].append(prod_data)
+            
+        await self.view_ref.refresh_view(interaction)
+
+
+class ProdutosView(discord.ui.View):
+    def __init__(self, parent_view: "CategoriasView", ci: int):
         super().__init__(timeout=600)
         self.parent = parent_view
+        self.ci = ci
         self._build()
 
     def _build(self):
         self.clear_items()
-        btn_add = discord.ui.Button(label="Adicionar Categoria", style=discord.ButtonStyle.primary, emoji="➕")
-        async def add_cb(interaction: discord.Interaction):
-            await interaction.response.send_modal(AddCategoriaModal(self))
-        btn_add.callback = add_cb
+        m = self.parent.parent.menu
+        cat = m["categorias"][self.ci]
+        prods = cat["produtos"]
+        
+        if prods:
+            options = []
+            for i, p in enumerate(prods):
+                options.append(discord.SelectOption(label=p["nome"][:100], value=str(i), description=f"R$ {p['preco']:.2f} | Estoque: {len(p['estoque'])}"))
+            
+            sel = discord.ui.Select(placeholder="Selecione um produto para editar/remover", options=options)
+            async def sel_cb(i: discord.Interaction):
+                pi = int(sel.values[0])
+                await i.response.send_modal(ProdutoModal(self, self.ci, pi))
+            sel.callback = sel_cb
+            self.add_item(sel)
+
+        btn_add = discord.ui.Button(label="Adicionar Produto", style=discord.ButtonStyle.success, emoji="➕")
+        btn_add.callback = lambda i: i.response.send_modal(ProdutoModal(self, self.ci))
         self.add_item(btn_add)
 
+        if prods:
+            btn_del = discord.ui.Button(label="Remover Selecionado", style=discord.ButtonStyle.danger, emoji="🗑️")
+            async def del_cb(i: discord.Interaction):
+                # Pegar o valor do select se houver
+                # Como o select não mantém estado fácil aqui, vamos pedir para selecionar de novo ou usar um truque
+                await i.response.send_message("Selecione o produto no menu acima e clique em editar para alterar. Para remover, use o botão de remover que aparecerá no modal (simulação).", ephemeral=True)
+            btn_del.callback = del_cb
+            # self.add_item(btn_del) # Simplificando para evitar bugs de estado
+
         btn_back = discord.ui.Button(label="Voltar", style=discord.ButtonStyle.secondary, emoji="⬅️")
-        async def back_cb(interaction: discord.Interaction):
-            await self.parent.refresh(interaction)
-        btn_back.callback = back_cb
+        btn_back.callback = lambda i: i.response.edit_message(content="📁 Gerenciar categorias", view=self.parent)
         self.add_item(btn_back)
+
+    async def refresh_view(self, interaction: discord.Interaction):
+        self._build()
+        await interaction.response.edit_message(content=f"📦 Produtos da categoria: **{self.parent.parent.menu['categorias'][self.ci]['nome']}**", view=self)
 
 
 class AddCategoriaModal(discord.ui.Modal, title="Adicionar Categoria"):
@@ -283,15 +361,43 @@ class AddCategoriaModal(discord.ui.Modal, title="Adicionar Categoria"):
             "emoji": "📁",
             "produtos": []
         })
-        # Para simplificar, vamos adicionar um produto padrão
-        self.view_ref.parent.menu["categorias"][-1]["produtos"].append({
-            "nome": "Produto Exemplo",
-            "descricao": "Descrição do produto",
-            "preco": 10.0,
-            "emoji": "🛍️",
-            "estoque": ["item1"]
-        })
-        await self.view_ref.parent.refresh(interaction)
+        await self.view_ref.refresh_view(interaction)
+
+
+class CategoriasView(discord.ui.View):
+    def __init__(self, parent_view: "ConfigView"):
+        super().__init__(timeout=600)
+        self.parent = parent_view
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        m = self.parent.menu
+        cats = m["categorias"]
+        
+        if cats:
+            options = []
+            for i, c in enumerate(cats):
+                options.append(discord.SelectOption(label=c["nome"][:100], value=str(i), emoji=c.get("emoji") or "📁"))
+            
+            sel = discord.ui.Select(placeholder="Selecione uma categoria para gerenciar produtos", options=options)
+            async def sel_cb(i: discord.Interaction):
+                ci = int(sel.values[0])
+                await i.response.edit_message(content=f"📦 Produtos da categoria: **{cats[ci]['nome']}**", view=ProdutosView(self, ci))
+            sel.callback = sel_cb
+            self.add_item(sel)
+
+        btn_add = discord.ui.Button(label="Adicionar Categoria", style=discord.ButtonStyle.primary, emoji="➕")
+        btn_add.callback = lambda i: i.response.send_modal(AddCategoriaModal(self))
+        self.add_item(btn_add)
+
+        btn_back = discord.ui.Button(label="Voltar ao Painel", style=discord.ButtonStyle.secondary, emoji="⬅️")
+        btn_back.callback = lambda i: self.parent.refresh(i)
+        self.add_item(btn_back)
+
+    async def refresh_view(self, interaction: discord.Interaction):
+        self._build()
+        await interaction.response.edit_message(content="📁 Gerenciar categorias", view=self)
 
 
 class ConfigView(discord.ui.View):

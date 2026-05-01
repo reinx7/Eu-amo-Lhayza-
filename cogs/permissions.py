@@ -20,9 +20,10 @@ class Permissions(commands.Cog):
     async def perm(self, interaction: discord.Interaction,
                    acao: app_commands.Choice[str],
                    usuario: discord.User = None):
+        # Restrição estrita ao OWNER_ID
         if not is_owner(interaction.user.id):
             return await interaction.response.send_message(
-                "❌ Apenas o **dono** pode usar este comando.", ephemeral=True
+                "❌ Apenas o **dono** (configurado no config.json) pode usar este comando.", ephemeral=True
             )
 
         config = get_config()

@@ -27,11 +27,12 @@ def _has_open_ticket(user_id: int, guild_id: int) -> int | None:
 
 
 def _can_confirm_payment(member: discord.Member, menu: dict) -> bool:
+    # Apenas admins ou o dono podem aprovar
     if is_admin(member.id): return True
+    # Se houver um cargo específico configurado, membros com esse cargo também podem aprovar
     cargo_id = menu.get("cargo_compra", 0)
     if cargo_id and any(r.id == cargo_id for r in member.roles):
-        if member.guild_permissions.manage_channels or member.guild_permissions.administrator:
-            return True
+        return True
     return False
 
 
@@ -89,8 +90,10 @@ class ConfirmOrderView(discord.ui.View):
             await i.client.get_cog("Tickets").show_pix(i, self.menu_name, self.ci, self.pi, self.user_id)
         
         async def canc_cb(i: discord.Interaction):
-            if i.user.id != self.user_id: return await i.response.send_message("❌ Não é seu.", ephemeral=True)
-            await i.client.get_cog("Tickets").close_ticket(i, reason="Cancelado pelo usuário.")
+            # Usuário ou Admin podem cancelar
+            if i.user.id != self.user_id and not is_admin(i.user.id): 
+                return await i.response.send_message("❌ Sem permissão.", ephemeral=True)
+            await i.client.get_cog("Tickets").close_ticket(i, reason="Cancelado.")
             
         b1.callback = conf_cb; b2.callback = canc_cb
         self.add_item(b1); self.add_item(b2)
@@ -109,16 +112,23 @@ class PixView(discord.ui.View):
         menus = load_json(MENUS_PATH, {})
         menu = menus.get(self.menu_name, {})
         confirm_style = hex_to_button_style(menu.get("cor_botao_comprar", "#57F287"))
+        cancel_style = hex_to_button_style(menu.get("cor_botao_cancelar", "#ED4245"))
         
         b1 = discord.ui.Button(label="Confirmar pagamento", style=confirm_style, emoji="✅", custom_id=f"pay_{self.menu_name}_{self.ci}_{self.pi}")
+        b2 = discord.ui.Button(label="Cancelar", style=cancel_style, emoji="❌", custom_id=f"canc_pix_{self.menu_name}_{self.ci}_{self.pi}")
         
         async def pay_cb(i: discord.Interaction):
             if not _can_confirm_payment(i.user, menu):
                 return await i.response.send_message("❌ Apenas staff.", ephemeral=True)
             await i.client.get_cog("Tickets").deliver_product(i, self.menu_name, self.ci, self.pi, self.user_id)
             
-        b1.callback = pay_cb
-        self.add_item(b1)
+        async def canc_cb(i: discord.Interaction):
+            if i.user.id != self.user_id and not is_admin(i.user.id): 
+                return await i.response.send_message("❌ Sem permissão.", ephemeral=True)
+            await i.client.get_cog("Tickets").close_ticket(i, reason="Cancelado.")
+            
+        b1.callback = pay_cb; b2.callback = canc_cb
+        self.add_item(b1); self.add_item(b2)
 
 
 class Tickets(commands.Cog):
@@ -147,7 +157,12 @@ class Tickets(commands.Cog):
         # Adicionar admins às permissões
         from utils import get_config
         cfg = get_config()
-        for admin_id in [cfg.get("OWNER_ID")] + cfg.get("ADMINS", []):
+        owner_id = cfg.get("OWNER_ID")
+        if owner_id:
+            m = guild.get_member(owner_id)
+            if m: overwrites[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True)
+        
+        for admin_id in cfg.get("ADMINS", []):
             m = guild.get_member(admin_id)
             if m: overwrites[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_messages=True)
 
@@ -190,7 +205,6 @@ class Tickets(commands.Cog):
         await interaction.response.edit_message(embed=embed, view=PixView(menu_name, ci, pi, user_id))
 
     async def deliver_product(self, interaction: discord.Interaction, menu_name: str, ci: int, pi: int, user_id: int):
-        # Corrigir estoque: diminuir ao aprovar
         menus = load_json(MENUS_PATH, {})
         menu = menus.get(menu_name)
         prod = menu["categorias"][ci]["produtos"][pi]
@@ -203,7 +217,6 @@ class Tickets(commands.Cog):
 
         user = interaction.guild.get_member(user_id) or await self.bot.fetch_user(user_id)
         
-        # Embed DM com botão de Feedback
         dm_embed = discord.Embed(
             title="📦 Produto Entregue!",
             description=f"Obrigado! 💚\n\n**Produto:** {prod['nome']}\n**Conteúdo:**\n```{item}```",
@@ -221,7 +234,6 @@ class Tickets(commands.Cog):
         try: await user.send(embed=dm_embed, view=view_dm)
         except: dm_ok = False
 
-        # Delivery Log
         deliv_id = menu.get("delivery_channel")
         if deliv_id:
             deliv_ch = self.bot.get_channel(deliv_id)
@@ -243,7 +255,10 @@ class Tickets(commands.Cog):
         await self._do_close(interaction.channel)
 
     async def close_ticket(self, interaction: discord.Interaction, reason: str = "Fechado."):
-        await interaction.response.send_message(f"🔒 {reason} Fechando em 3s...")
+        if interaction.response.is_done():
+            await interaction.followup.send(f"🔒 {reason} Fechando em 3s...")
+        else:
+            await interaction.response.send_message(f"🔒 {reason} Fechando em 3s...")
         await asyncio.sleep(3)
         await self._do_close(interaction.channel)
 
@@ -253,7 +268,6 @@ class Tickets(commands.Cog):
         if info:
             info["open"] = False
             save_json(TICKETS_PATH, tickets)
-            # Remover cargo
             menus = load_json(MENUS_PATH, {})
             menu = menus.get(info["menu_name"], {})
             cargo_id = menu.get("cargo_compra")

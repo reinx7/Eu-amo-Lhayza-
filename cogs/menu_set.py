@@ -20,8 +20,6 @@ def build_public_embed(menu: dict, bot=None) -> discord.Embed:
     if menu.get("banner_url"):
         embed.set_image(url=menu["banner_url"])
     
-    # Se for "buttons", mostra a lista de produtos no embed.
-    # Se for "select", NÃO mostra a lista (conforme pedido).
     if menu.get("tipo_selecao") != "select":
         for cat in menu["categorias"]:
             emoji_cat = emoji_for_text(cat.get("emoji") or menu["emojis"].get("emoji_categoria", ""), bot) or "📁"
@@ -118,17 +116,20 @@ class PublicMenuView(discord.ui.View):
         return cb
 
     async def _on_select(self, interaction: discord.Interaction):
-        # Correção do bug: Resetar o select para permitir escolher novamente
-        # No Discord, para "resetar" um select menu, precisamos re-enviar a view.
-        ci, pi = map(int, interaction.data["values"][0].split(":"))
+        # Correção: Pegar os valores antes de qualquer defer
+        vals = interaction.data.get("values")
+        if not vals: return
         
-        # Primeiro abrimos o ticket (que já faz o defer/followup)
+        ci, pi = map(int, vals[0].split(":"))
+        
+        # Abrir o ticket
         await self._open_ticket(interaction, ci, pi)
         
-        # Depois, editamos a mensagem original para "limpar" a seleção do select
-        # Isso é feito re-instanciando a view ou apenas editando a mensagem com a mesma view.
+        # Resetar a view para permitir nova seleção sem travar
         try:
-            await interaction.edit_original_response(view=self)
+            # Re-instanciar a view limpa o estado de seleção do select menu no Discord
+            new_view = PublicMenuView(self.menu_name, self.menu, self.bot)
+            await interaction.edit_original_response(view=new_view)
         except:
             pass
 
@@ -142,12 +143,14 @@ class PublicMenuView(discord.ui.View):
             prod = cat["produtos"][pi]
         except (IndexError, KeyError):
             return await interaction.response.send_message("❌ Produto inválido.", ephemeral=True)
+        
         if not prod.get("estoque"):
             return await interaction.response.send_message("❌ Esse produto está esgotado.", ephemeral=True)
 
         tickets_cog = interaction.client.get_cog("Tickets")
         if not tickets_cog:
             return await interaction.response.send_message("❌ Sistema de tickets indisponível.", ephemeral=True)
+        
         await tickets_cog.create_ticket(interaction, self.menu_name, ci, pi)
 
 
