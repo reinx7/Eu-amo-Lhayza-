@@ -5,7 +5,7 @@ Autor: gerado para o projeto do cliente
 import asyncio
 import os
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from utils import get_config
 
@@ -42,13 +42,24 @@ class SalesBot(commands.Bot):
         print(f"Bot online como: {self.user} (ID: {self.user.id})")
         print(f"Servidores: {len(self.guilds)}")
         print("=" * 50)
-        await self.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="🛒 vendas premium"
-            ),
-            status=discord.Status.online,
-        )
+        if not self.update_status.is_running():
+            self.update_status.start()
+
+    @tasks.loop(seconds=10)
+    async def update_status(self):
+        messages = [
+            "china ama lhayza ♥️",
+            "Bot Payment v1",
+            f"Estou em {len(self.guilds)} servidores"
+        ]
+        for msg in messages:
+            await self.change_presence(
+                activity=discord.Streaming(
+                    name=msg,
+                    url="https://www.twitch.tv/discord"
+                )
+            )
+            await asyncio.sleep(10)
 
 
 async def main():
