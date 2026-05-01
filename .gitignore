@@ -8,6 +8,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-config.json
+# config.json (removido do ignore para permitir configuração de ID)
 data/tickets.json
 data/menus.json
