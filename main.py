@@ -43,16 +43,22 @@ class SalesBot(commands.Bot):
         print(f"Servidores: {len(self.guilds)}")
         print("=" * 50)
         await self.change_presence(
-            activity=discord.Activity(type=discord.ActivityType.watching, name="🛒 vendas premium"),
+            activity=discord.Activity(
+                type=discord.ActivityType.watching,
+                name="🛒 vendas premium"
+            ),
             status=discord.Status.online,
         )
 
 
 async def main():
     config = get_config()
-    token = config.get("TOKEN")
+
+    # 🔐 pega primeiro da variável de ambiente (Railway)
+    token = os.getenv("TOKEN") or config.get("TOKEN")
+
     if not token or token == "COLE_SEU_TOKEN_AQUI":
-        print("❌ Configure o TOKEN em config.json antes de iniciar o bot.")
+        print("❌ Configure o TOKEN (variável de ambiente ou config.json).")
         return
 
     bot = SalesBot()
