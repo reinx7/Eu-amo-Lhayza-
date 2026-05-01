@@ -13,18 +13,18 @@ pip install -r requirements.txt
 
 ## 🔧 Configuração
 
-Edite o arquivo `config.json`:
+Configure o **TOKEN** do seu bot nas variáveis de ambiente (recomendado) ou edite o arquivo `config.json`:
 
 ```json
 {
-    "TOKEN": "SEU_TOKEN_DO_BOT",
+    "TOKEN": "COLE_SEU_TOKEN_AQUI",
     "OWNER_ID": 123456789012345678,
     "ADMINS": [],
     "PIX_KEY": "sua-chave-pix@email.com"
 }
 ```
 
-- **TOKEN**: Token do seu bot (https://discord.com/developers/applications)
+- **TOKEN**: Token do seu bot (Opcional se usar variáveis de ambiente)
 - **OWNER_ID**: Seu ID do Discord (clique direito no seu nome > Copiar ID)
 - **ADMINS**: Lista de IDs que podem usar o painel `/menu`
 - **PIX_KEY**: Sua chave PIX padrão (pode ser alterada por menu também)
